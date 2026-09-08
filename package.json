@@ -1,0 +1,24 @@
+{
+  "name": "amr-service-qr",
+  "version": "0.1.0",
+  "private": true,
+  "description": "QR service-request dispatch for Aston Martin Residences: 17 elevators and 18 amenity locations. Scan -> confirm -> department notified -> MARK SERVICED.",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "seed": "node scripts/seed.js",
+    "qr": "node scripts/qr.js",
+    "signs": "node scripts/signs.js",
+    "locations": "node scripts/locations.js",
+    "check": "node scripts/check.js",
+    "test": "node test/smoke.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "nodemailer": "^9.0.3",
+    "qrcode": "^1.5.4"
+  }
+}

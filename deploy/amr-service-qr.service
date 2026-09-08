@@ -1,0 +1,58 @@
+# systemd unit for a bare-metal / VM Linux deployment (no Docker).
+#
+#   sudo cp deploy/amr-service-qr.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now amr-service-qr
+#   journalctl -u amr-service-qr -f
+#
+# Assumes the application is at /opt/amr-service-qr, owned by a service account
+# named "amrsvc", with .env in that directory (mode 0600).
+
+[Unit]
+Description=AMR Service Requests (QR dispatch)
+Documentation=file:/opt/amr-service-qr/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=amrsvc
+Group=amrsvc
+WorkingDirectory=/opt/amr-service-qr
+EnvironmentFile=/opt/amr-service-qr/.env
+ExecStart=/usr/bin/node src/server.js
+
+Restart=always
+RestartSec=5
+
+# The app handles SIGTERM by draining in-flight requests, then exits. Give it
+# room to finish rather than cutting a resident off mid-request.
+KillSignal=SIGTERM
+TimeoutStopSec=20
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=amr-service-qr
+
+# Hardening. The service reads its own code and writes exactly one directory.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+# The only writable path: the SQLite database and generated signs.
+ReadWritePaths=/var/lib/amr-service-qr
+Environment=DATA_DIR=/var/lib/amr-service-qr
+Environment=SIGNS_DIR=/var/lib/amr-service-qr/signs
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target

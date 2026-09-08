@@ -1,0 +1,59 @@
+# Reverse proxy for service.300miamicondo.com.
+#
+# The application speaks plain HTTP on loopback and never terminates TLS
+# itself. Certificates, HSTS, and redirects all belong here.
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name service.300miamicondo.com;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name service.300miamicondo.com;
+
+    ssl_certificate     /etc/letsencrypt/live/service.300miamicondo.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/service.300miamicondo.com/privkey.pem;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+
+    add_header Strict-Transport-Security "max-age=31536000" always;
+    add_header X-Frame-Options DENY always;
+    add_header X-Content-Type-Options nosniff always;
+
+    # Residents scan from inside elevators on marginal cellular signal. Keeping
+    # the response small and gzipped matters more here than on a normal site.
+    gzip on;
+    gzip_types text/html text/css application/json;
+
+    # Nothing here accepts an upload, and no legitimate request has a body
+    # larger than a form post with one field.
+    client_max_body_size 16k;
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_connect_timeout 5s;
+        proxy_read_timeout    30s;
+    }
+
+    # The management dashboard is passcode-protected, but it has no business
+    # being reachable from outside the building. Uncomment and set your ranges
+    # if you want it restricted at the proxy as well.
+    # location /ops {
+    #     allow 203.0.113.0/24;   # office / building network
+    #     deny  all;
+    #     proxy_pass http://127.0.0.1:8080;
+    #     proxy_set_header Host              $host;
+    #     proxy_set_header X-Forwarded-Proto $scheme;
+    # }
+}

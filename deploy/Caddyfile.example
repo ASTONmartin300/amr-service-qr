@@ -1,0 +1,49 @@
+# Caddy reverse proxy. Recommended over nginx when you are administering this
+# yourself: Caddy obtains and renews the TLS certificate automatically, with no
+# certbot, no cron job, and no renewal that quietly expires eighteen months from
+# now while you are not looking.
+#
+# Install to /etc/caddy/Caddyfile, replace the hostname, then:
+#   sudo systemctl reload caddy
+
+service.example.com {
+	# Everything the app serves is on loopback, plain HTTP. Caddy handles TLS.
+	reverse_proxy 127.0.0.1:8080
+
+	encode gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Frame-Options "DENY"
+		X-Content-Type-Options "nosniff"
+		-Server
+	}
+
+	# Nothing here accepts an upload. The largest legitimate request is a form
+	# post with a single field.
+	request_body {
+		max_size 16KB
+	}
+
+	log {
+		output file /var/log/caddy/service-qr.log {
+			roll_size 10MB
+			roll_keep 5
+		}
+	}
+}
+
+# Optional: restrict the management dashboard to known addresses.
+#
+# Only do this if you have a static IP at the office. Getting locked out of
+# /ops is recoverable (edit this file over SSH), but it is an annoying way to
+# spend an afternoon. The dashboard is passcode-protected either way.
+#
+# service.example.com {
+# 	@ops path /ops*
+# 	@notoffice not remote_ip 203.0.113.4
+# 	respond @ops 403 {
+# 		close
+# 	}
+# 	reverse_proxy 127.0.0.1:8080
+# }

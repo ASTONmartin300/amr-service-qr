@@ -1,0 +1,29 @@
+# docker compose up -d
+#
+# Expects a .env file beside this one (copy .env.example). Everything the
+# application needs is in that single file; there is no other configuration.
+services:
+  service-qr:
+    build: .
+    container_name: amr-service-qr
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Overrides whatever .env says, because inside the container the app must
+      # listen on the container interface for the proxy to reach it.
+      BIND_HOST: 0.0.0.0
+      PORT: 8080
+      DATA_DIR: /data
+      SIGNS_DIR: /data/signs
+    ports:
+      # Loopback only. TLS and public exposure are the reverse proxy's job --
+      # publishing this on 0.0.0.0 would put an HTTP service on the host's
+      # routable address.
+      - "127.0.0.1:8080:8080"
+    volumes:
+      # Request history and the location tokens live here. This is the one path
+      # that must be backed up; losing it means reprinting every QR code.
+      - service-qr-data:/data
+
+volumes:
+  service-qr-data:
