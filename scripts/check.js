@@ -13,6 +13,29 @@ const { buildDispatch, sendViaResend } = require('../src/mailer');
 const args = process.argv.slice(2);
 const testEmail = args.includes('--email') ? args[args.indexOf('--email') + 1] : null;
 
+// A test dispatch is built against request #0, which matches no real row, so
+// its MARK SERVICED link is inert by design -- a preflight must never be able
+// to close a live request. But the button looks exactly like the real one, so
+// anyone testing will click it and get "Link not valid" and reasonably think
+// something is broken. Say so in the email itself.
+function asTestMessage(message) {
+  const notice = 'This is a test. The MARK SERVICED button below is intentionally '
+    + 'inactive -- clicking it will say "Link not valid", which is correct. '
+    + 'On a real request it works.';
+
+  return {
+    subject: `[TEST] ${message.subject}`,
+    text: `*** ${notice} ***\n\n${message.text}`,
+    html: message.html.replace(
+      '<div style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;max-width:560px;color:#111">',
+      '<div style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;max-width:560px;color:#111">'
+      + '<p style="background:#f6ece6;color:#7a4526;padding:12px 14px;border-left:3px solid #8a5230;'
+      + 'font-size:13px;line-height:1.5;margin:0 0 22px">'
+      + `<strong>Test message.</strong> ${notice.replace('This is a test. ', '')}</p>`,
+    ),
+  };
+}
+
 let failures = 0;
 const ok = (m) => console.log(`  PASS  ${m}`);
 const bad = (m) => { failures++; console.log(`  FAIL  ${m}`); };
@@ -86,10 +109,7 @@ async function main() {
           active[0],
         );
         try {
-          await sendViaResend({
-            to: testEmail,
-            message: { ...message, subject: `[TEST] ${message.subject}` },
-          });
+          await sendViaResend({ to: testEmail, message: asTestMessage(message) });
           ok(`Test dispatch sent to ${testEmail} -- check it arrives and is not in Junk`);
         } catch (err) {
           bad(`Test send failed: ${err.message}`);
@@ -127,8 +147,7 @@ async function main() {
       );
       try {
         await tx.sendMail({
-          from: config.smtp.from, to: testEmail,
-          subject: `[TEST] ${message.subject}`, text: message.text, html: message.html,
+          from: config.smtp.from, to: testEmail, ...asTestMessage(message),
         });
         ok(`Test dispatch sent to ${testEmail} -- check it renders and the button looks right`);
       } catch (err) {
