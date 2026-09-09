@@ -51,8 +51,23 @@ async function main() {
   }
 
   // 4. Email delivery
+  //
+  // A --email test send runs even under DRY_RUN. Otherwise delivery could only
+  // ever be proven by going live first, which is the wrong order: you would be
+  // flipping the switch on 44 signs while still guessing whether the mail
+  // works. The operator typed a specific address, so honour it.
   if (config.dryRun) {
-    note('DRY_RUN=true -- requests are recorded but housekeeping is NOT emailed');
+    note('DRY_RUN=true -- real requests are recorded but staff are NOT emailed');
+    if (testEmail) {
+      note(`--email given: sending one test to ${testEmail} anyway, so you can`);
+      note('   confirm delivery before going live');
+    } else {
+      note('Add --email you@example.com to prove delivery works before go-live');
+    }
+  }
+
+  if (config.dryRun && !testEmail) {
+    // Nothing to verify: no send requested and none would happen.
   } else if (config.emailProvider === 'resend') {
     if (!config.resend.apiKey) {
       bad('EMAIL_PROVIDER=resend but RESEND_API_KEY is blank');
@@ -122,9 +137,21 @@ async function main() {
     }
   }
 
-  // 5. Dispatch target
-  if (!config.dryRun && !config.housekeepingEmail) bad('HOUSEKEEPING_EMAIL is blank');
-  else if (config.housekeepingEmail) ok(`Dispatch to: ${config.housekeepingEmail}${config.dispatchCc ? ` (cc ${config.dispatchCc})` : ''}`);
+  // 5. Dispatch routing -- show every destination, not just housekeeping.
+  // A repair quietly going to the cleaning inbox is the failure nobody notices.
+  if (!config.dryRun && !config.housekeepingEmail) {
+    bad('HOUSEKEEPING_EMAIL is blank');
+  } else if (config.housekeepingEmail) {
+    ok(`Cleaning + resupply -> ${config.housekeepingEmail}`);
+    const eng = config.departments.engineering;
+    if (eng && eng !== config.housekeepingEmail) {
+      ok(`Broken items      -> ${eng}`);
+    } else {
+      note(`Broken items      -> ${config.housekeepingEmail} (ENGINEERING_EMAIL not set,`);
+      note('   so repairs go to housekeeping too)');
+    }
+    if (config.dispatchCc) ok(`Copied on all      -> ${config.dispatchCc}`);
+  }
 
   console.log(
     failures
