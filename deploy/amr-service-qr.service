@@ -43,10 +43,20 @@ ProtectHome=true
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
-RestrictAddressFamilies=AF_INET AF_INET6
+# AF_UNIX is needed for local socket use inside Node's runtime, not just
+# outbound network calls.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 RestrictNamespaces=true
 LockPersonality=true
-MemoryDenyWriteExecute=true
+
+# NOTE: MemoryDenyWriteExecute must NOT be set here.
+#
+# It is good hardening for most services, but V8 -- Node's JavaScript engine --
+# compiles to machine code at runtime and needs memory it can write and then
+# execute. With it enabled, Node aborts during startup with
+# "Check failed: 12 == (*__errno_location ())" inside
+# v8::base::OS::SetPermissions, which reads like a crash rather than a policy
+# refusal. Everything else in this section is safe with Node.
 
 # The only writable path: the SQLite database and generated signs.
 ReadWritePaths=/var/lib/amr-service-qr
