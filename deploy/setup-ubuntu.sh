@@ -249,7 +249,7 @@ Currently in DRY_RUN mode: requests are recorded, housekeeping is NOT emailed.
 
 Next:
   1. Open the dashboard and sign in.
-  2. Verify 35 locations exist (17 elevators, 18 amenities).
+  2. Verify 44 locations exist (17 elevators, 26 amenities, 1 supply point).
   3. Print the signs and install them.
   4. Walk the building and scan every one. Confirm the right name appears.
   5. Then go live:
