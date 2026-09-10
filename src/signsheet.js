@@ -6,45 +6,41 @@
 
 const QRCode = require('qrcode');
 const { escapeHtml } = require('./mailer');
-const { parseServices } = require('./services');
 
-// The heading and the call to action both have to match what the resident is
-// standing in front of. An amenity sign reading "Elevator Service" is the kind
-// of detail that makes an otherwise good system look unconsidered -- and asking
-// someone to "request housekeeping service" at an empty dog-bag dispenser is
-// asking the wrong question entirely.
-const HEADINGS = {
+// One heading and one call to action on every sign in the building. The code
+// already knows where it is, so the sign never needs to say "Elevator" or
+// "Supply" -- and one voice across 44 signs reads as intentional where three
+// headings read as a ticketing system. Only the middle line varies, to name
+// what might need attention here.
+//
+// Register chosen with Operations, 2026-09-10: hospitality, not facilities.
+// It offers rather than asks, and avoids "report", "issue" and "request".
+const VOICE = {
+  en: 'At Your Service',
+  es: 'A su servicio',
+  ctaEn: 'Scan and let us know',
+  ctaEs: 'Escanee y av&iacute;senos',
+  fineEn: 'Discreet and anonymous. Nothing to type.',
+  fineEs: 'Discreto y an&oacute;nimo. Nada que escribir.',
+};
+
+const LEDE = {
   elevator: {
-    en: 'Elevator Service', es: 'Servicio de Ascensor',
-    ctaEn: 'Scan to report an issue',
-    ctaEs: 'Escanee para reportar un problema',
+    en: 'Should this elevator need attention, we would be glad to know.',
+    es: 'Si este ascensor requiere atenci&oacute;n, nos gustar&iacute;a saberlo.',
   },
   amenity: {
-    en: 'Service Request', es: 'Solicitud de Servicio',
-    ctaEn: 'Scan to report an issue',
-    ctaEs: 'Escanee para reportar un problema',
+    en: 'Should anything here need attention, we would be glad to know.',
+    es: 'Si algo aqu&iacute; requiere atenci&oacute;n, nos gustar&iacute;a saberlo.',
   },
   supply: {
-    en: 'Supply Request', es: 'Solicitud de Suministro',
-    ctaEn: 'Scan to report empty or running low',
-    ctaEs: 'Escanee para reportar vac&iacute;o o escaso',
+    en: 'Should the bags run low, we would be glad to know.',
+    es: 'Si las bolsas se agotan, nos gustar&iacute;a saberlo.',
   },
 };
 
-// A sign that offers only cleaning can still say so precisely -- there is no
-// reason to make it vaguer than the screen behind it.
 function headingFor(location) {
-  const base = HEADINGS[location.kind] || HEADINGS.amenity;
-  const offered = parseServices(location.services);
-  if (offered.length === 1 && offered[0] === 'cleaning' && location.kind !== 'elevator') {
-    return {
-      ...base,
-      en: 'Housekeeping Service', es: 'Servicio de Limpieza',
-      ctaEn: 'Scan to request housekeeping service',
-      ctaEs: 'Escanee para solicitar servicio de limpieza',
-    };
-  }
-  return base;
+  return { ...VOICE, lede: LEDE[location.kind] || LEDE.amenity };
 }
 
 const STYLE = `
@@ -102,8 +98,8 @@ async function buildSignSheet(locations, baseUrl, { hint } = {}) {
     <div class="eyebrow">Aston Martin Residences</div>
     <h1>${escapeHtml(heading.en)}<span class="es">${escapeHtml(heading.es)}</span></h1>
     <p class="lede">
-      Help us maintain the Aston Martin Residences standard.
-      <span class="es">Ay&uacute;denos a mantener el est&aacute;ndar de Aston Martin Residences.</span>
+      ${heading.lede.en}
+      <span class="es">${heading.lede.es}</span>
     </p>
     <div class="qr">${svg}</div>
     <p class="cta">
@@ -111,8 +107,8 @@ async function buildSignSheet(locations, baseUrl, { hint } = {}) {
       <span class="es">${heading.ctaEs}</span>
     </p>
     <p class="fine">
-      No information or registration required.
-      <span class="es">No se requiere informaci&oacute;n ni registro.</span>
+      ${heading.fineEn}
+      <span class="es">${heading.fineEs}</span>
     </p>
     <div class="rule"></div>
     <div class="tag">${escapeHtml(location.label_en)}</div>
@@ -131,4 +127,4 @@ ${pages.join('\n')}
 </body></html>`;
 }
 
-module.exports = { buildSignSheet, signSvg, HEADINGS };
+module.exports = { buildSignSheet, signSvg, VOICE, LEDE };
