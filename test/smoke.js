@@ -121,6 +121,25 @@ async function main() {
   const health = await (await fetch(`${BASE}/health`)).json();
   check('Health endpoint reports state', health.ok === true && typeof health.open === 'number');
 
+  // --- seeded service options ---------------------------------------------
+  //
+  // Regression guard. First-boot seeding once failed to pass services through,
+  // so every location came up cleaning-only. Nothing broke visibly: the site
+  // worked, requests dispatched. It only showed as one button instead of three
+  // and wrong wording on the printed sign -- discoverable after lamination.
+  const seeded = store.listLocations();
+  const multiService = seeded.filter((l) => String(l.services).includes(','));
+  check('Seeded locations carry their service options',
+    multiService.length > 0,
+    'Every location is single-service. Seeding dropped the services column.');
+
+  const supplyPoint = seeded.find((l) => l.kind === 'supply');
+  if (supplyPoint) {
+    check('Supply points are not seeded as cleaning',
+      !String(supplyPoint.services).includes('cleaning'),
+      `${supplyPoint.label_en} offers "${supplyPoint.services}" -- a dispenser should never ask to be cleaned.`);
+  }
+
   // --- request types ------------------------------------------------------
 
   const multi = store.listLocations().find(

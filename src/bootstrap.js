@@ -40,6 +40,11 @@ function autoSeed({ enabled }) {
       kind: entry.kind,
       department: entry.department,
       sortOrder: entry.sortOrder,
+      // Must be passed. Omitting it silently defaults every location to
+      // cleaning-only, which shows one button instead of three AND changes the
+      // wording on the printed sign -- a failure that only becomes visible
+      // after 44 signs have been laminated.
+      services: entry.services,
     });
   }
 
