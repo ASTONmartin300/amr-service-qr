@@ -63,7 +63,21 @@ async function main() {
   fs.mkdirSync(outDir, { recursive: true });
   console.log(`\n${sections.length} signs found\n`);
 
-  const browser = await chromium.launch();
+  let browser;
+  try {
+    browser = await chromium.launch();
+  } catch (err) {
+    // Playwright keeps its browsers per Windows account. An elevated "Run as
+    // administrator" PowerShell runs as a different account, which has none.
+    if (/Executable doesn't exist/.test(err.message)) {
+      const who = (err.message.match(/C:\\Users\\([^\\]+)/) || [])[1];
+      console.error(`\nChromium is not installed for the account this terminal runs as${who ? ` (${who})` : ''}.`);
+      console.error('Close this window and open a normal PowerShell -- not "Run as administrator" --');
+      console.error('so it runs as your own account, where the browser is already installed.\n');
+      process.exit(1);
+    }
+    throw err;
+  }
   const page = await browser.newPage({ viewport: { width: 480, height: 672 } });
 
   const used = new Set();
