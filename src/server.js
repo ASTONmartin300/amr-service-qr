@@ -16,7 +16,8 @@ const { sendDispatch } = require('./mailer');
 const views = require('./views');
 const signsheet = require('./signsheet');
 const { autoSeed } = require('./bootstrap');
-const { parseServices } = require('./services');
+const { parseServices, parseSupplies } = require('./services');
+const scheduler = require('./scheduler');
 
 // --- small helpers ---------------------------------------------------------
 
@@ -121,7 +122,22 @@ async function handleRequest(req, res, token, url, ip) {
       return send(res, 200, views.alreadyPage(lang));
     }
 
-    const request = store.createRequest(location.id, type);
+    // Resupply asks one more question -- what is out -- when the location has
+    // a list to offer. Still one tap, still nothing typed, and it turns "bring
+    // something" into "bring towels". Anything not on the list falls back to
+    // the picker rather than being stored, so the detail column only ever
+    // holds values we put there.
+    let detail = null;
+    const items = parseSupplies(location.supplies);
+    if (type === 'supply' && items.length) {
+      const picked = form.get('detail');
+      if (!picked) return send(res, 200, views.supplyPickerPage(location, items, lang));
+      const match = items.find((i) => i.key === picked);
+      detail = match ? match.en : (picked === 'other' ? 'Other' : null);
+      if (!detail) return send(res, 200, views.supplyPickerPage(location, items, lang));
+    }
+
+    const request = store.createRequest(location.id, type, detail);
 
     // Thank the resident immediately; deliver the email after. SMTP to M365
     // can take seconds, and nobody should hold a phone up in an elevator
@@ -144,11 +160,16 @@ function handleDone(req, res, signed) {
     return send(res, 400, views.servicedPage({ invalid: true }));
   }
 
-  const request = store.getRequest(Number(payload.slice(4)));
+  // "req:<id>" from older emails, "req:<id>:<dept>" from current ones. The
+  // department is inside the signature, so it cannot be edited by the tapper.
+  const [, idPart, deptPart] = payload.split(':');
+  const closedBy = ['housekeeping', 'engineering'].includes(deptPart) ? deptPart : 'email';
+
+  const request = store.getRequest(Number(idPart));
   if (!request) return send(res, 404, views.servicedPage({ invalid: true }));
 
   const location = store.getLocationById(request.location_id);
-  const closed = store.completeRequest(request.id);
+  const closed = store.completeRequest(request.id, closedBy);
 
   if (!closed) {
     return send(res, 200, views.servicedPage({
@@ -332,6 +353,55 @@ function handleOpsLocationsCsv(req, res) {
   });
 }
 
+// GET /ops/digest -- preview of the weekly digest as it would be emailed, with
+// buttons to send it (or the backup) right now. Useful the first week, and
+// any time someone wants the numbers before Monday.
+function handleOpsDigest(req, res, url) {
+  if (!isSignedIn(req)) return send(res, 200, views.loginPage());
+  const built = scheduler.buildDigest();
+  const sent = url.searchParams.get('sent');
+  const notice = sent
+    ? `<p style="background:#e8f0e9;color:#245536;padding:10px 14px;border-radius:3px;font-size:13px;margin:0 0 16px">
+         ${sent === 'digest' ? 'Digest sent' : 'Backup sent'} to ${escapeHtmlLocal(sent === 'digest' ? config.digest.to : config.backup.to)}${config.dryRun ? ' (DRY_RUN — logged, not delivered)' : ''}.</p>`
+    : '';
+  const bar = `
+    <div style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;max-width:600px;margin:0 auto;padding:24px 20px 0">
+      <p style="font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:#8a8f98;margin:0 0 10px">
+        <a href="/ops" style="color:#14161a;text-decoration:none">&larr; Dashboard</a> &nbsp;&middot;&nbsp; Preview
+      </p>
+      ${notice}
+      <form method="POST" action="/ops/digest/send" style="display:inline;margin:0 8px 0 0">
+        <button type="submit" style="background:#14161a;color:#fff;border:0;padding:9px 16px;border-radius:2px;font-size:11px;letter-spacing:.09em;text-transform:uppercase;cursor:pointer">Email digest now</button>
+      </form>
+      <form method="POST" action="/ops/backup/send" style="display:inline;margin:0">
+        <button type="submit" style="background:transparent;color:#14161a;border:1px solid #c9ccd2;padding:9px 16px;border-radius:2px;font-size:11px;letter-spacing:.09em;text-transform:uppercase;cursor:pointer">Email backup now</button>
+      </form>
+      <p style="font-size:12px;color:#8a8f98;margin:12px 0 24px">
+        Scheduled: digest every ${['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][config.digest.day] || 'Monday'} at ${config.digest.hour}:00 to ${escapeHtmlLocal(config.digest.to || '(unset)')} &middot;
+        backup on the ${config.backup.dayOfMonth}${['st','nd','rd'][config.backup.dayOfMonth - 1] || 'th'} to ${escapeHtmlLocal(config.backup.to || '(unset)')}
+      </p>
+      <hr style="border:0;border-top:1px solid #e8e9ec;margin:0 0 24px">
+    </div>
+    <div style="max-width:600px;margin:0 auto;padding:0 20px 60px">`;
+  return send(res, 200, `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow">
+<title>Weekly digest - Aston Martin Residences</title></head><body style="margin:0;background:#faf9f7">
+${bar}${built.html}</div></body></html>`);
+}
+
+function escapeHtmlLocal(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+async function handleOpsSendNow(req, res, which) {
+  if (!isSignedIn(req)) return send(res, 403, views.loginPage('Session expired.'));
+  const status = which === 'digest'
+    ? await scheduler.runDigest({ force: true })
+    : await scheduler.runBackup({ force: true });
+  console.log(`[ops] ${which} sent now -> ${status}`);
+  return send(res, 302, '', { Location: `/ops/digest?sent=${which}` });
+}
+
 // GET /ops/backup -- downloads a consistent copy of the database.
 //
 // This is the single most important button in the application. The QR tokens
@@ -368,7 +438,7 @@ async function handleOpsComplete(req, res) {
   const form = await readForm(req);
   const id = Number(form.get('id'));
   if (Number.isFinite(id)) {
-    if (store.completeRequest(id)) console.log(`[complete] #${id} closed from dashboard`);
+    if (store.completeRequest(id, 'dashboard')) console.log(`[complete] #${id} closed from dashboard`);
   }
   return send(res, 302, '', { Location: '/ops' });
 }
@@ -411,6 +481,9 @@ const server = http.createServer(async (req, res) => {
     if (path === '/ops/signs' && method === 'GET') return handleOpsSigns(req, res, url);
     if (path === '/ops/backup' && method === 'GET') return handleOpsBackup(req, res);
     if (path === '/ops/locations.csv' && method === 'GET') return handleOpsLocationsCsv(req, res);
+    if (path === '/ops/digest' && method === 'GET') return handleOpsDigest(req, res, url);
+    if (path === '/ops/digest/send' && method === 'POST') return handleOpsSendNow(req, res, 'digest');
+    if (path === '/ops/backup/send' && method === 'POST') return handleOpsSendNow(req, res, 'backup');
     if (path === '/ops/login' && method === 'POST') return handleOpsLogin(req, res, ip);
     if (path === '/ops/complete' && method === 'POST') return handleOpsComplete(req, res);
     if (path === '/ops/logout') {
@@ -439,6 +512,7 @@ if (problems.length) {
 }
 
 autoSeed({ enabled: config.autoSeed });
+scheduler.start();
 
 server.listen(config.port, config.bindHost, () => {
   const locations = store.listLocations();

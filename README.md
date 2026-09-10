@@ -153,6 +153,46 @@ wall, still resolving, but showing "not currently active" instead of dispatching
 — use it during elevator modernization, when an amenity closes for renovation,
 or if a code gets photographed and passed around.
 
+### What happens on its own
+
+Three jobs run inside the service, once a minute, and record what they have
+done in the database so a restart never repeats an email.
+
+| Job | When | Goes to |
+|---|---|---|
+| **Escalation** | A request still open after 30 minutes, then again at 60 | `ESCALATE_TO` (front desk), then `ESCALATE_AGAIN_TO` (manager) |
+| **Weekly digest** | Monday 07:00 building time | `DIGEST_TO` — requests, response times, re-scans, by location and team |
+| **Monthly backup** | 1st of the month, 06:00 | `BACKUP_TO` — the database file, attached. Keep these emails. |
+
+All three fall back to `MANAGER_EMAIL`, then `DISPATCH_CC`, so a minimal
+`.env` still routes them somewhere. Preview the digest, or send either the
+digest or the backup immediately, at `/ops/digest`.
+
+An escalated request shows an `L1` or `L2` badge in the dashboard's Open
+section. The history table's **By** column shows which team closed each
+request — janitorial, maintenance, or the dashboard — which is what lets
+response times be compared by team.
+
+### Resupply picker
+
+At locations stocked with consumables, tapping **Out of supplies** asks one
+more question — *Towels? Water?* — before filing. Still one tap, still nothing
+typed. The chosen item goes in the email subject, so janitorial knows what to
+bring. Items are set per location in [scripts/amr-building.js](scripts/amr-building.js)
+(restrooms get paper and soap, pools and cabanas get towels and water, the
+dog station gets bags) and synced by the seed.
+
+### External uptime monitoring
+
+Nothing in the app can tell you the app is down. Use a free external monitor:
+
+1. [uptimerobot.com](https://uptimerobot.com) → sign up → **Add New Monitor**
+2. Type **HTTP(s)**, URL `https://amrservices300.com/health`, interval 5 minutes
+3. Alert contact: your email
+
+`/health` returns `{"ok":true,...}` and touches the database, so it fails if
+SQLite becomes unreadable, not only if the process dies.
+
 ### Adding a location
 
 Add a line to [scripts/amr-building.js](scripts/amr-building.js) and re-run the

@@ -69,4 +69,22 @@ function isValid(key) {
   return Object.prototype.hasOwnProperty.call(SERVICES, key);
 }
 
-module.exports = { SERVICES, ORDER, parseServices, serialize, get, isValid };
+// The resupply picker items for a location. Stored as "Towels / Toallas,Water
+// / Agua": English before the slash, Spanish after, so one string carries both
+// languages. Returns [{ key, en, es }]; key is what the form posts back.
+function parseSupplies(raw) {
+  return String(raw || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((item) => {
+      const [en, es] = item.split('/').map((x) => x.trim());
+      return {
+        key: en.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
+        en,
+        es: es || en,
+      };
+    });
+}
+
+module.exports = { SERVICES, ORDER, parseServices, parseSupplies, serialize, get, isValid };

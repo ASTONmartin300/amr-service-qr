@@ -221,6 +221,64 @@ async function main() {
     store.db.prepare('DELETE FROM requests WHERE location_id = ?').run(multi.id);
   }
 
+  // --- resupply picker, closed-by, escalation, digest, backup ---------------
+  const sched = require('../src/scheduler');
+  const restroom = store.listLocations().find((l) => /Restroom/.test(l.label_en) && l.supplies);
+
+  if (!restroom) {
+    check('A location with supply items exists', false, 'Seed the building: npm run seed -- --building');
+  } else {
+    console.log(`\n  Using ${restroom.label_en} (${restroom.supplies})\n`);
+    store.db.prepare('DELETE FROM requests WHERE location_id = ?').run(restroom.id);
+    const post = (body) => fetch(`${BASE}/r/${restroom.token}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams(body),
+    });
+
+    const picker = await (await post({ type: 'supply' })).text();
+    check('Resupply asks what is out', picker.includes('What is running low') && picker.includes('Toilet paper'));
+    check('Picker still collects nothing typed', !/<input[^>]+type=["']?(text|email|tel)/i.test(picker));
+    check('Nothing filed until an item is chosen', !store.latestRequestForLocation(restroom.id, 'supply'));
+
+    await post({ type: 'supply', detail: 'toilet-paper' });
+    await new Promise((r) => setTimeout(r, 200));
+    const supplyReq = store.latestRequestForLocation(restroom.id, 'supply');
+    check('Chosen item stored on the request', supplyReq && supplyReq.detail === 'Toilet paper',
+      `detail was "${supplyReq && supplyReq.detail}"`);
+
+    // Closing through the department-stamped link records who did it.
+    await fetch(servicedUrl(supplyReq.id, 'housekeeping'));
+    check('Close link records the team', store.getRequest(supplyReq.id).closed_by === 'housekeeping',
+      `closed_by was "${store.getRequest(supplyReq.id).closed_by}"`);
+
+    // Escalation: backdate an open request and run the job directly.
+    const old = store.createRequest(restroom.id, 'cleaning');
+    const backdate = (min) => store.db.prepare('UPDATE requests SET created_at = ? WHERE id = ?')
+      .run(new Date(Date.now() - min * 60000).toISOString(), old.id);
+
+    backdate(45);
+    await sched.runEscalations();
+    check('45-minute-old request escalates to level 1', store.getRequest(old.id).escalation_level === 1,
+      `level=${store.getRequest(old.id).escalation_level}`);
+
+    const again = await sched.runEscalations();
+    check('Escalation is not repeated', again === 0 && store.getRequest(old.id).escalation_level === 1);
+
+    backdate(75);
+    await sched.runEscalations();
+    check('75-minute-old request escalates to level 2', store.getRequest(old.id).escalation_level === 2);
+
+    store.db.prepare('DELETE FROM requests WHERE location_id = ?').run(restroom.id);
+  }
+
+  const digest = sched.buildDigest();
+  check('Weekly digest builds', digest.subject.startsWith('Service requests') && digest.html.includes('Median'));
+
+  const snap = sched.snapshotDatabase();
+  check('Backup snapshot is a valid SQLite file',
+    snap.content.subarray(0, 15).toString() === 'SQLite format 3' && snap.filename.endsWith('.db'));
+
   console.log(failures ? `\n${failures} check(s) failed.\n` : '\nAll checks passed.\n');
   process.exit(failures ? 1 : 0);
 }

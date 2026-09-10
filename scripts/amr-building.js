@@ -28,10 +28,31 @@ const CLEAN_FIX = ['cleaning', 'repair'];
 const FULL = ['cleaning', 'repair', 'supply'];
 const SUPPLY_FIX = ['supply', 'repair'];
 
+// What "Out of supplies" can mean at a given place. Shown as buttons after the
+// resident taps resupply, so janitorial knows what to bring rather than making
+// a trip to find out. Derived from the kind of place rather than listed per
+// location, because the answer is the same for every restroom and every
+// cabana. Rendered as "Towels / Toallas" -- the Spanish rides along after the
+// slash so the picker is bilingual without a second lookup table.
+const SUPPLIES = {
+  restroom: ['Toilet paper / Papel higiénico', 'Paper towels / Toallas de papel', 'Soap / Jabón'],
+  towels: ['Towels / Toallas', 'Water / Agua'],
+  dog: ['Dog bags / Bolsas para perros'],
+};
+
+function suppliesFor(labelEn, kind, services) {
+  if (!services.includes('supply')) return null;
+  if (kind === 'supply') return SUPPLIES.dog;
+  if (/restroom/i.test(labelEn)) return SUPPLIES.restroom;
+  return SUPPLIES.towels;
+}
+
 function add(labelEn, labelEs, kind, department, services) {
+  const svc = services || CLEAN_FIX;
   locations.push({
     labelEn, labelEs, kind, department,
-    services: services || CLEAN_FIX,
+    services: svc,
+    supplies: suppliesFor(labelEn, kind, svc),
     sortOrder: (order += 10),
   });
 }

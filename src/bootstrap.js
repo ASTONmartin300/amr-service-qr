@@ -45,6 +45,7 @@ function autoSeed({ enabled }) {
       // wording on the printed sign -- a failure that only becomes visible
       // after 44 signs have been laminated.
       services: entry.services,
+      supplies: entry.supplies,
     });
   }
 

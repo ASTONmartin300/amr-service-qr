@@ -36,21 +36,29 @@ function formatTime(iso) {
 // The link is signed and only ever closes an 'open' row, so forwarding the
 // email around cannot reopen or falsely close anything. 7-day TTL keeps a
 // months-old email in someone's archive from being tapped by accident.
-function servicedUrl(requestId) {
-  return `${config.publicBaseUrl}/done/${sign(`req:${requestId}`, 7 * 86400000)}`;
+//
+// The department the email went to rides inside the signature, so when the
+// link is tapped we know which team closed it -- without trusting anything the
+// tapper could edit.
+function servicedUrl(requestId, dept) {
+  const payload = dept ? `req:${requestId}:${dept}` : `req:${requestId}`;
+  return `${config.publicBaseUrl}/done/${sign(payload, 7 * 86400000)}`;
 }
 
 function buildDispatch(request, location) {
   const when = formatTime(request.created_at);
-  const url = servicedUrl(request.id);
   const svc = getService(request.type);
+  const url = servicedUrl(request.id, svc.dept);
+  // "Out of supplies" on its own sends someone to find out what. The picker
+  // answers that, and it belongs in the subject where a glance catches it.
+  const what = request.detail ? ` (${request.detail})` : '';
 
   const text = [
     `${location.label_en} has been ${svc.reported}.`,
     '',
     `Request received: ${when}`,
     `Location: ${location.label_en}`,
-    `Type: ${svc.en.short}`,
+    `Type: ${svc.en.short}${what}`,
     `Request #${request.id}`,
     '',
     'When the work is finished, mark it serviced:',
@@ -69,7 +77,7 @@ function buildDispatch(request, location) {
     <tr><td style="padding:3px 18px 3px 0;color:#666">Location</td>
         <td style="padding:3px 0"><strong>${escapeHtml(location.label_en)}</strong></td></tr>
     <tr><td style="padding:3px 18px 3px 0;color:#666">Type</td>
-        <td style="padding:3px 0"><strong>${escapeHtml(svc.en.short)}</strong></td></tr>
+        <td style="padding:3px 0"><strong>${escapeHtml(svc.en.short)}${escapeHtml(what)}</strong></td></tr>
     <tr><td style="padding:3px 18px 3px 0;color:#666">Request</td>
         <td style="padding:3px 0">#${request.id}</td></tr>
   </table>
@@ -82,7 +90,7 @@ function buildDispatch(request, location) {
 </div>`.trim();
 
   return {
-    subject: `${svc.emailPrefix} - ${location.label_en}`,
+    subject: `${svc.emailPrefix} - ${location.label_en}${what}`,
     text,
     html,
   };
@@ -103,36 +111,90 @@ function escapeHtml(s) {
   ));
 }
 
-// Resend's HTTPS API. Node 24 has fetch built in, so this adds no dependency.
-// Throws on failure; sendDispatch catches.
-async function sendViaResend({ to, message }) {
-  const res = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${config.resend.apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      from: config.resend.from,
-      to: [to],
-      cc: config.dispatchCc ? [config.dispatchCc] : undefined,
-      reply_to: config.resend.replyTo || undefined,
-      subject: message.subject,
-      text: message.text,
-      html: message.html,
-    }),
-    signal: AbortSignal.timeout(15000),
-  });
+function providerReady() {
+  return (config.emailProvider === 'resend' && config.resend.apiKey) || !!getTransport();
+}
 
-  if (!res.ok) {
-    // Resend returns a JSON body explaining the refusal -- an unverified
-    // sending domain being the usual one. Surface it rather than just a code.
-    let detail = '';
-    try {
-      const body = await res.json();
-      detail = body.message || body.name || JSON.stringify(body);
-    } catch { detail = await res.text().catch(() => ''); }
-    throw new Error(`Resend ${res.status}: ${detail}`);
+// Sends one message through whichever provider is configured. Throws on
+// failure and ignores DRY_RUN -- this is the raw path, for callers that have
+// explicitly decided to send (the preflight test, the wrappers below).
+//
+//   { to, cc, subject, text, html, attachments: [{ filename, content: Buffer }] }
+async function deliverEmail({ to, cc, subject, text, html, attachments }) {
+  const useResend = config.emailProvider === 'resend' && config.resend.apiKey;
+  const tx = useResend ? null : getTransport();
+  if (!useResend && !tx) throw new Error('no email provider configured');
+
+  const toList = Array.isArray(to) ? to : [to];
+  const ccList = cc ? (Array.isArray(cc) ? cc : [cc]) : [];
+  const replyTo = config.resend.replyTo || undefined;
+  const files = attachments && attachments.length ? attachments : null;
+
+  if (useResend) {
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${config.resend.apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from: config.resend.from,
+        to: toList,
+        cc: ccList.length ? ccList : undefined,
+        reply_to: replyTo,
+        subject, text, html,
+        attachments: files
+          ? files.map((a) => ({ filename: a.filename, content: a.content.toString('base64') }))
+          : undefined,
+      }),
+      signal: AbortSignal.timeout(20000),
+    });
+
+    if (!res.ok) {
+      // Resend returns a JSON body explaining the refusal -- an unverified
+      // sending domain being the usual one. Surface it rather than just a code.
+      let detail = '';
+      try {
+        const body = await res.json();
+        detail = body.message || body.name || JSON.stringify(body);
+      } catch { detail = await res.text().catch(() => ''); }
+      throw new Error(`Resend ${res.status}: ${detail}`);
+    }
+    return;
+  }
+
+  await tx.sendMail({
+    from: config.smtp.from,
+    to: toList.join(', '),
+    cc: ccList.length ? ccList.join(', ') : undefined,
+    replyTo,
+    subject, text, html,
+    attachments: files ? files.map((a) => ({ filename: a.filename, content: a.content })) : undefined,
+  });
+}
+
+// The send everything else should use. Three guards: DRY_RUN logs instead of
+// sending, an unconfigured provider logs instead of sending, and a delivery
+// failure is reported rather than thrown -- nothing that emails should ever be
+// able to crash the service. Returns 'dry_run' | 'console' | 'sent' | 'failed'.
+async function sendEmail(message, { label } = {}) {
+  const tag = label || message.subject;
+  const to = Array.isArray(message.to) ? message.to.join(', ') : message.to;
+
+  if (config.dryRun) {
+    console.log(`[DRY_RUN] would email ${to}: ${message.subject}`);
+    return 'dry_run';
+  }
+  if (!providerReady()) {
+    console.log(`[console] no email provider configured; not sending: ${message.subject}`);
+    return 'console';
+  }
+  try {
+    await deliverEmail(message);
+    return 'sent';
+  } catch (err) {
+    console.error(`[mail] FAILED (${tag}): ${err.message}`);
+    return 'failed';
   }
 }
 
@@ -142,44 +204,21 @@ async function sendViaResend({ to, message }) {
 async function sendDispatch(request, location) {
   const message = buildDispatch(request, location);
   const to = recipientFor(request, location);
+  const svc = getService(request.type);
 
-  if (config.dryRun) {
-    console.log(`[DRY_RUN] would email ${to}: ${message.subject}`);
-    console.log(`[DRY_RUN] mark serviced: ${servicedUrl(request.id)}`);
-    return 'dry_run';
+  // When nothing is really going out, print the close link so a local tester
+  // can still exercise MARK SERVICED.
+  if (config.dryRun || !providerReady()) {
+    console.log(`[mail] mark serviced: ${servicedUrl(request.id, svc.dept)}`);
   }
 
-  const useResend = config.emailProvider === 'resend' && config.resend.apiKey;
-  const tx = useResend ? null : getTransport();
-
-  if (!useResend && !tx) {
-    console.log(`[console] no email provider configured; not sending: ${message.subject}`);
-    console.log(`[console] mark serviced: ${servicedUrl(request.id)}`);
-    return 'console';
-  }
-
-  try {
-    if (useResend) {
-      await sendViaResend({ to, message });
-    } else {
-      await tx.sendMail({
-        from: config.smtp.from,
-        to,
-        cc: config.dispatchCc || undefined,
-        replyTo: config.resend.replyTo || undefined,
-        subject: message.subject,
-        text: message.text,
-        html: message.html,
-      });
-    }
-    return 'sent';
-  } catch (err) {
-    console.error(`[mail] FAILED for request #${request.id}: ${err.message}`);
-    return 'failed';
-  }
+  return sendEmail(
+    { to, cc: config.dispatchCc || undefined, ...message },
+    { label: `request #${request.id}` },
+  );
 }
 
 module.exports = {
-  sendDispatch, sendViaResend, servicedUrl, buildDispatch, recipientFor,
+  sendEmail, deliverEmail, sendDispatch, servicedUrl, buildDispatch, recipientFor,
   formatTime, escapeHtml,
 };

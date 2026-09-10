@@ -118,6 +118,9 @@ else
   read -rp "  Where staff replies should go [${CC_EMAIL:-$HK_EMAIL}]: " REPLY_ADDR
   REPLY_ADDR="${REPLY_ADDR:-${CC_EMAIL:-$HK_EMAIL}}"
 
+  read -rp "  Manager email (escalations, weekly digest, monthly backup) [${CC_EMAIL:-$HK_EMAIL}]: " MGR_EMAIL
+  MGR_EMAIL="${MGR_EMAIL:-${CC_EMAIL:-$HK_EMAIL}}"
+
   read -rp "  Passcode for the management dashboard: " OPS_PASSCODE
 
   SECRET="$(node -e 'console.log(require("crypto").randomBytes(32).toString("hex"))')"
@@ -144,6 +147,16 @@ SUPPRESSION_MINUTES=30
 RESEND_API_KEY="${RESEND_KEY}"
 RESEND_FROM="${RESEND_SENDER}"
 REPLY_TO="${REPLY_ADDR}"
+
+# Escalation, digest, backup. The front desk gets the 30-minute nudge; the
+# manager gets the 60-minute one, the Monday digest, and the monthly backup.
+MANAGER_EMAIL="${MGR_EMAIL}"
+ESCALATE_AFTER_MINUTES=30
+ESCALATE_TO="${CC_EMAIL:-$HK_EMAIL}"
+ESCALATE_AGAIN_AFTER_MINUTES=60
+DIGEST_DAY=1
+DIGEST_HOUR=7
+BACKUP_DAY=1
 
 SMTP_HOST="${SMTP_HOSTNAME}"
 SMTP_PORT=587

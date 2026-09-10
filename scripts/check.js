@@ -8,7 +8,7 @@
 const nodemailer = require('nodemailer');
 const { config, assertReady } = require('../src/config');
 const store = require('../src/db');
-const { buildDispatch, sendViaResend } = require('../src/mailer');
+const { buildDispatch, deliverEmail } = require('../src/mailer');
 
 const args = process.argv.slice(2);
 const testEmail = args.includes('--email') ? args[args.indexOf('--email') + 1] : null;
@@ -109,7 +109,7 @@ async function main() {
           active[0],
         );
         try {
-          await sendViaResend({ to: testEmail, message: asTestMessage(message) });
+          await deliverEmail({ to: testEmail, ...asTestMessage(message) });
           ok(`Test dispatch sent to ${testEmail} -- check it arrives and is not in Junk`);
         } catch (err) {
           bad(`Test send failed: ${err.message}`);

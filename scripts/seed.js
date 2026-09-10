@@ -92,6 +92,13 @@ for (const entry of entries) {
       console.log(`  updated   ${entry.labelEn.padEnd(30)}${current.services} -> ${want}`);
       synced++;
     }
+    // Same treatment for the resupply picker items.
+    const wantSupplies = (entry.supplies || []).join(',') || null;
+    if ((current.supplies || null) !== wantSupplies) {
+      store.setLocationSupplies(current.token, wantSupplies);
+      console.log(`  supplies  ${entry.labelEn.padEnd(30)}${wantSupplies || '(none)'}`);
+      synced++;
+    }
     continue;
   }
   const location = store.createLocation({
@@ -102,6 +109,7 @@ for (const entry of entries) {
     department: entry.department || department,
     sortOrder: entry.sortOrder,
     services: entry.services || 'cleaning',
+    supplies: entry.supplies,
   });
   existing.add(entry.labelEn.toLowerCase());
   created++;

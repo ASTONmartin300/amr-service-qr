@@ -15,6 +15,10 @@ const STRINGS = {
     confirmPrompt: 'Choose what needs attention',
     confirmNote: 'No name, unit number, or contact information is collected.',
 
+    supplyTitle: 'What is running low?',
+    supplyOther: 'Something else',
+    supplyBack: 'Back',
+
     thanksTitle: 'Thank you.',
     thanksBody: 'The right team has been notified.',
     thanksNote: 'There is nothing else you need to do.',
@@ -43,6 +47,10 @@ const STRINGS = {
     confirmButton: 'Solicitar servicio',
     confirmPrompt: 'Elija qué necesita atención',
     confirmNote: 'No se recopila nombre, número de unidad ni datos de contacto.',
+
+    supplyTitle: '¿Qué se está agotando?',
+    supplyOther: 'Otra cosa',
+    supplyBack: 'Volver',
 
     thanksTitle: 'Gracias.',
     thanksBody: 'Se ha notificado al equipo correspondiente.',

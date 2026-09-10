@@ -107,6 +107,45 @@ function confirmPage(location, lang) {
   });
 }
 
+// One more tap after "Out of supplies": which supply. Items come from the
+// location and already carry both languages. "Something else" is always
+// offered, so nobody is stuck because the thing that ran out is not listed.
+function supplyPickerPage(location, items, lang) {
+  const s = t(lang);
+  const name = label(location, lang);
+  const btn = (key, text, primary) => `
+      <form method="POST" action="/r/${location.token}?lang=${s.htmlLang}" style="width:100%">
+        <input type="hidden" name="type" value="supply">
+        <input type="hidden" name="detail" value="${escapeHtml(key)}">
+        <button type="submit" style="
+          appearance:none;cursor:pointer;font-family:inherit;width:100%;
+          font-size:15px;letter-spacing:.09em;text-transform:uppercase;
+          padding:18px 20px;border-radius:2px;-webkit-tap-highlight-color:transparent;
+          background:${primary ? '#14161a' : 'transparent'};
+          color:${primary ? '#fff' : '#14161a'};
+          border:${primary ? '0' : '1px solid #c9ccd2'}">
+          ${escapeHtml(text)}
+        </button>
+      </form>`;
+
+  const buttons = items.map((i, n) => btn(i.key, lang === 'es' ? i.es : i.en, n === 0)).join('')
+    + btn('other', s.supplyOther, false);
+
+  return page({
+    lang: s.htmlLang,
+    title: `${s.supplyTitle} - ${s.brand}`,
+    footer: `<footer><a href="/r/${location.token}?lang=${s.htmlLang}">${escapeHtml(s.supplyBack)}</a></footer>`,
+    body: `
+      <div class="brand">${escapeHtml(s.brand)}</div>
+      <h1>${escapeHtml(s.supplyTitle)}</h1>
+      <div class="location">${escapeHtml(name)}</div>
+      <div style="display:flex;flex-direction:column;gap:11px;width:100%;max-width:300px">
+        ${buttons}
+      </div>
+      <p class="note">${escapeHtml(s.confirmNote)}</p>`,
+  });
+}
+
 function thanksPage(lang) {
   const s = t(lang);
   return page({
@@ -203,6 +242,24 @@ function loginPage(error) {
 
 // Colour separates the three request kinds at a glance, which is the whole
 // point of showing type in a queue someone scans rather than reads.
+// Who closed a request. The department names are what staff call themselves,
+// not the internal keys.
+const TEAM_LABEL = {
+  housekeeping: 'Janitorial',
+  engineering: 'Maintenance',
+  dashboard: 'Dashboard',
+  email: 'Email link',
+};
+function teamLabel(closedBy) {
+  if (!closedBy) return '<span class="muted">&mdash;</span>';
+  return escapeHtml(TEAM_LABEL[closedBy] || closedBy);
+}
+
+// Type pill with the resupply item beside it, when there is one.
+function typeCell(r) {
+  return typePill(r.type) + (r.detail ? ` <span class="muted" style="font-size:12px">${escapeHtml(r.detail)}</span>` : '');
+}
+
 function typePill(type) {
   const svc = getService(type);
   const tone = { cleaning: 'clean', repair: 'fix', supply: 'stock' }[svc.key] || 'clean';
@@ -276,9 +333,9 @@ function dashboardPage({ open, stats, recent, days }) {
       ${open.map((r) => `
         <tr>
           <td><strong>${escapeHtml(r.label_en)}</strong></td>
-          <td>${typePill(r.type)}</td>
+          <td>${typeCell(r)}</td>
           <td>${escapeHtml(formatTime(r.created_at))}</td>
-          <td>${fmtMinutes(elapsedMinutes(r.created_at))}</td>
+          <td>${fmtMinutes(elapsedMinutes(r.created_at))}${r.escalation_level ? ` <span class="pill open" title="Escalated">L${r.escalation_level}</span>` : ''}</td>
           <td class="muted">${r.suppressed_scans || 0}</td>
           <td style="text-align:right">
             <form method="POST" action="/ops/complete" style="margin:0">
@@ -304,7 +361,7 @@ function dashboardPage({ open, stats, recent, days }) {
   const recentRows = recent.length ? recent.slice(0, 60).map((r) => `
     <tr>
       <td><strong>${escapeHtml(r.label_en)}</strong></td>
-      <td>${typePill(r.type)}</td>
+      <td>${typeCell(r)}</td>
       <td>${escapeHtml(formatTime(r.created_at))}</td>
       <td>${r.status === 'open'
         ? '<span class="pill open">Open</span>'
@@ -313,8 +370,9 @@ function dashboardPage({ open, stats, recent, days }) {
       <td>${r.completed_at
         ? fmtMinutes((new Date(r.completed_at) - new Date(r.created_at)) / 60000)
         : '<span class="muted">&mdash;</span>'}</td>
+      <td>${teamLabel(r.closed_by)}</td>
     </tr>`).join('')
-    : '<tr><td colspan="6" class="muted" style="text-align:center;padding:26px">No requests yet.</td></tr>';
+    : '<tr><td colspan="7" class="muted" style="text-align:center;padding:26px">No requests yet.</td></tr>';
 
   const banner = config.dryRun
     ? `<div style="background:#f6ece6;color:#8a5230;padding:11px 16px;border-radius:3px;
@@ -335,6 +393,7 @@ function dashboardPage({ open, stats, recent, days }) {
     <div class="muted" style="font-size:13px">
       Last ${days} days
       &middot; <a class="plain" href="/ops/locations">Locations &amp; signs</a>
+      &middot; <a class="plain" href="/ops/digest">Weekly digest</a>
       &middot; <a class="plain" href="/ops/logout">Sign out</a>
     </div>
   </div>
@@ -360,7 +419,7 @@ function dashboardPage({ open, stats, recent, days }) {
 
   <h2>History</h2>
   <div class="scroll"><table>
-    <tr><th>Location</th><th>Type</th><th>Requested</th><th>Status</th><th>Completed</th><th>Response</th></tr>
+    <tr><th>Location</th><th>Type</th><th>Requested</th><th>Status</th><th>Completed</th><th>Response</th><th>By</th></tr>
     ${recentRows}
   </table></div>
 
@@ -548,4 +607,5 @@ module.exports = {
   loginPage,
   dashboardPage,
   locationsPage,
+  supplyPickerPage,
 };

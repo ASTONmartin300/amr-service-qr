@@ -77,6 +77,28 @@ const config = {
   // Only meaningful once -- see src/bootstrap.js for the guards.
   autoSeed: bool(process.env.AUTO_SEED, false),
 
+  // Where the things that are not dispatches go: escalations, the weekly
+  // digest, the monthly backup. Each has its own override; all fall back to
+  // MANAGER_EMAIL, then to the dispatch CC, so a minimal .env still routes
+  // everything somewhere sensible.
+  managerEmail: process.env.MANAGER_EMAIL || process.env.DISPATCH_CC || '',
+  escalation: {
+    afterMinutes: int(process.env.ESCALATE_AFTER_MINUTES, 30),
+    to: process.env.ESCALATE_TO || process.env.DISPATCH_CC || '',
+    againAfterMinutes: int(process.env.ESCALATE_AGAIN_AFTER_MINUTES, 60),
+    againTo: process.env.ESCALATE_AGAIN_TO || process.env.MANAGER_EMAIL || process.env.DISPATCH_CC || '',
+  },
+  digest: {
+    to: process.env.DIGEST_TO || process.env.MANAGER_EMAIL || process.env.DISPATCH_CC || '',
+    day: int(process.env.DIGEST_DAY, 1),      // 0 = Sunday ... 6 = Saturday
+    hour: int(process.env.DIGEST_HOUR, 7),    // local time, config.timeZone
+  },
+  backup: {
+    to: process.env.BACKUP_TO || process.env.MANAGER_EMAIL || process.env.DISPATCH_CC || '',
+    dayOfMonth: int(process.env.BACKUP_DAY, 1),
+    hour: int(process.env.BACKUP_HOUR, 6),
+  },
+
   // DATA_DIR lets the service keep its database on a persistent volume or a
   // backed-up path rather than inside the deployed application directory,
   // which a redeploy may replace wholesale.

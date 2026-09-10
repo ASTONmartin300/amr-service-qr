@@ -79,28 +79,79 @@ addColumnIfMissing('locations', 'services', "TEXT NOT NULL DEFAULT 'cleaning'");
 // Requests filed before this column existed were all cleaning requests.
 addColumnIfMissing('requests', 'type', "TEXT NOT NULL DEFAULT 'cleaning'");
 
+// What a resupply request is for (towels, paper, dog bags). Null for other
+// types, and for resupply requests filed before the picker existed.
+addColumnIfMissing('requests', 'detail', 'TEXT');
+
+// Who closed it: 'housekeeping' or 'engineering' when tapped from their email,
+// 'dashboard' when closed by management, null for requests closed before this
+// was tracked. Lets response times split by team.
+addColumnIfMissing('requests', 'closed_by', 'TEXT');
+
+// How far up the chain an open request has been escalated. 0 = not yet,
+// 1 = front desk notified, 2 = manager notified. Kept on the row rather than
+// in memory so a restart never re-sends an escalation already sent.
+addColumnIfMissing('requests', 'escalation_level', 'INTEGER NOT NULL DEFAULT 0');
+
+// The items a resupply request at this location can be for, comma-separated.
+// Blank means the picker is skipped and the request is filed as plain resupply.
+addColumnIfMissing('locations', 'supplies', 'TEXT');
+
+// Small key/value store for "when did the digest last go out" and the like.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT
+  );
+`);
+
 const nowIso = () => new Date().toISOString();
+
+// --- meta ------------------------------------------------------------------
+
+function getMeta(key) {
+  const row = db.prepare('SELECT value FROM meta WHERE key = ?').get(key);
+  return row ? row.value : null;
+}
+
+function setMeta(key, value) {
+  db.prepare(`
+    INSERT INTO meta (key, value) VALUES (?, ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+  `).run(key, value == null ? null : String(value));
+}
 
 // --- locations -------------------------------------------------------------
 
+function serializeSupplies(list) {
+  const items = (Array.isArray(list) ? list : String(list || '').split(','))
+    .map((s) => s.trim()).filter(Boolean);
+  return items.length ? items.join(',') : null;
+}
+
 function createLocation({
-  token, labelEn, labelEs, kind, department, notifyEmail, sortOrder, services,
+  token, labelEn, labelEs, kind, department, notifyEmail, sortOrder, services, supplies,
 }) {
   db.prepare(`
     INSERT INTO locations
       (token, label_en, label_es, kind, department, notify_email, sort_order,
-       services, active, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+       services, supplies, active, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
   `).run(token, labelEn, labelEs, kind || 'amenity',
     department || 'housekeeping', notifyEmail || null,
     Number.isFinite(sortOrder) ? sortOrder : 1000,
-    serializeServices(services || 'cleaning'), nowIso());
+    serializeServices(services || 'cleaning'), serializeSupplies(supplies), nowIso());
   return getLocationByToken(token);
 }
 
 function setLocationServices(token, services) {
   db.prepare('UPDATE locations SET services = ? WHERE token = ?')
     .run(serializeServices(services), token);
+}
+
+function setLocationSupplies(token, supplies) {
+  db.prepare('UPDATE locations SET supplies = ? WHERE token = ?')
+    .run(serializeSupplies(supplies), token);
 }
 
 function getLocationByToken(token) {
@@ -159,12 +210,29 @@ function suppressingRequest(locationId, type, minutes) {
   return null;
 }
 
-function createRequest(locationId, type) {
+function createRequest(locationId, type, detail) {
   const info = db.prepare(`
-    INSERT INTO requests (location_id, type, created_at, status)
-    VALUES (?, ?, ?, 'open')
-  `).run(locationId, type || 'cleaning', nowIso());
+    INSERT INTO requests (location_id, type, detail, created_at, status)
+    VALUES (?, ?, ?, ?, 'open')
+  `).run(locationId, type || 'cleaning', detail || null, nowIso());
   return getRequest(Number(info.lastInsertRowid));
+}
+
+// Open requests that have been waiting longer than `minutes` and have not yet
+// been escalated past `belowLevel`. The scheduler calls this once per level.
+function openRequestsOlderThan(minutes, belowLevel) {
+  const cutoff = new Date(Date.now() - minutes * 60000).toISOString();
+  return db.prepare(`
+    SELECT r.*, l.label_en, l.label_es, l.token
+    FROM requests r JOIN locations l ON l.id = r.location_id
+    WHERE r.status = 'open' AND r.created_at <= ? AND r.escalation_level < ?
+    ORDER BY r.created_at ASC
+  `).all(cutoff, belowLevel);
+}
+
+function setEscalationLevel(requestId, level) {
+  db.prepare('UPDATE requests SET escalation_level = ? WHERE id = ? AND escalation_level < ?')
+    .run(level, requestId, level);
 }
 
 function getRequest(id) {
@@ -182,11 +250,13 @@ function setEmailStatus(requestId, status) {
 
 // Single-use by construction: only an 'open' row is updated, so a forwarded or
 // replayed MARK SERVICED link is a no-op. Returns true if this call closed it.
-function completeRequest(id) {
+// closedBy is who did it -- a department name from the email link, or
+// 'dashboard' -- so response times can be split by team.
+function completeRequest(id, closedBy) {
   const info = db.prepare(`
-    UPDATE requests SET status = 'completed', completed_at = ?
+    UPDATE requests SET status = 'completed', completed_at = ?, closed_by = ?
     WHERE id = ? AND status = 'open'
-  `).run(nowIso(), id);
+  `).run(nowIso(), closedBy || null, id);
   return info.changes > 0;
 }
 
@@ -233,14 +303,80 @@ function locationStats(days) {
   `).all(since);
 }
 
+// Everything the weekly digest needs, in one call. Window is [since, until).
+function periodSummary(sinceIso, untilIso) {
+  const rows = db.prepare(`
+    SELECT r.*, l.label_en
+    FROM requests r JOIN locations l ON l.id = r.location_id
+    WHERE r.created_at >= ? AND r.created_at < ?
+  `).all(sinceIso, untilIso);
+
+  const minutes = (r) => (new Date(r.completed_at) - new Date(r.created_at)) / 60000;
+  const completed = rows.filter((r) => r.completed_at);
+  const times = completed.map(minutes).sort((a, b) => a - b);
+  const median = times.length ? times[Math.floor(times.length / 2)] : null;
+
+  const byType = {};
+  const byTeam = {};
+  const byLocation = {};
+  for (const r of rows) {
+    byType[r.type] = (byType[r.type] || 0) + 1;
+    const loc = byLocation[r.label_en] || (byLocation[r.label_en] = {
+      label: r.label_en, total: 0, open: 0, rescans: 0, times: [],
+    });
+    loc.total++;
+    if (r.status === 'open') loc.open++;
+    loc.rescans += r.suppressed_scans || 0;
+    if (r.completed_at) {
+      loc.times.push(minutes(r));
+      const team = r.closed_by || 'unrecorded';
+      const t = byTeam[team] || (byTeam[team] = { closed: 0, times: [] });
+      t.closed++;
+      t.times.push(minutes(r));
+    }
+  }
+
+  const locations = Object.values(byLocation).map((l) => ({
+    label: l.label,
+    total: l.total,
+    open: l.open,
+    rescans: l.rescans,
+    avg: l.times.length ? l.times.reduce((a, b) => a + b, 0) / l.times.length : null,
+    worst: l.times.length ? Math.max(...l.times) : null,
+  })).sort((a, b) => b.total - a.total);
+
+  const teams = Object.entries(byTeam).map(([team, t]) => ({
+    team,
+    closed: t.closed,
+    median: t.times.sort((a, b) => a - b)[Math.floor(t.times.length / 2)],
+  }));
+
+  return {
+    since: sinceIso,
+    until: untilIso,
+    total: rows.length,
+    completed: completed.length,
+    stillOpen: rows.filter((r) => r.status === 'open').length,
+    median,
+    worst: times.length ? times[times.length - 1] : null,
+    rescans: rows.reduce((n, r) => n + (r.suppressed_scans || 0), 0),
+    byType,
+    locations,
+    teams,
+  };
+}
+
 module.exports = {
   db,
+  getMeta,
+  setMeta,
   createLocation,
   getLocationByToken,
   getLocationById,
   listLocations,
   setLocationActive,
   setLocationServices,
+  setLocationSupplies,
   rotateLocationToken,
   latestRequestForLocation,
   suppressingRequest,
@@ -250,6 +386,9 @@ module.exports = {
   setEmailStatus,
   completeRequest,
   openRequests,
+  openRequestsOlderThan,
+  setEscalationLevel,
   recentRequests,
   locationStats,
+  periodSummary,
 };
