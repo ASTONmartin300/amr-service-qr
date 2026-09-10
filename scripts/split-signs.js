@@ -60,6 +60,22 @@ async function main() {
     process.exit(1);
   }
 
+  // The sheet in Downloads is whatever was last saved. If the wording on it
+  // predates the current copy, splitting it prints 44 signs nobody wants.
+  // Refuse unless told otherwise, rather than producing plausible-looking
+  // PDFs with stale text.
+  const { VOICE } = require('../src/signsheet');
+  const firstHeading = (sections[0].match(/<h1>([^<]*)/) || [, ''])[1].trim();
+  if (firstHeading !== VOICE.en && !process.argv.includes('--allow-stale')) {
+    console.error(`\nThis sheet says "${firstHeading}" but the current sign copy is "${VOICE.en}".`);
+    console.error('It was downloaded before the wording changed, or the server has not been updated.\n');
+    console.error('  1. On the server:  cd ~/amr-service-qr && git pull && bash deploy/setup-ubuntu.sh');
+    console.error('  2. Re-download:    /ops/locations -> Print all signs -> save as HTML');
+    console.error('  3. Run this again.\n');
+    console.error('To split it anyway, add --allow-stale.\n');
+    process.exit(1);
+  }
+
   fs.mkdirSync(outDir, { recursive: true });
   console.log(`\n${sections.length} signs found\n`);
 
