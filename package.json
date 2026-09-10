@@ -14,7 +14,8 @@
     "signs": "node scripts/signs.js",
     "locations": "node scripts/locations.js",
     "check": "node scripts/check.js",
-    "test": "node test/smoke.js"
+    "test": "node test/smoke.js",
+    "sign-pdfs": "node scripts/sign-pdfs.js"
   },
   "dependencies": {
     "dotenv": "^16.4.5",

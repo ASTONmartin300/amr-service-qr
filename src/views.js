@@ -532,7 +532,10 @@ function locationsPage(locations, flash = {}) {
     reprinted and reinstalled. Download a copy monthly and keep it somewhere that
     is not this server.
   </p>
-  <p><a class="print" href="/ops/backup">Download database</a></p>
+  <p>
+    <a class="print" href="/ops/backup">Download database</a>
+    <a class="print" href="/ops/locations.csv">Download location list</a>
+  </p>
 </div></body></html>`;
 }
 

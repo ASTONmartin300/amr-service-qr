@@ -292,6 +292,46 @@ async function handleOpsSigns(req, res, url) {
   return send(res, 200, html);
 }
 
+// GET /ops/locations.csv -- the code-to-location map as a spreadsheet.
+//
+// Two uses: a durable off-server record of which code is in which room (useful
+// on its own if a sign is ever damaged and unreadable), and a way to feed the
+// real tokens into anything that generates artwork, without hand-copying 44
+// strings out of a terminal.
+function handleOpsLocationsCsv(req, res) {
+  if (!isSignedIn(req)) return send(res, 200, views.loginPage());
+
+  // Excel decides a field is a formula if it starts with = + - @, so anything
+  // beginning with one gets a leading apostrophe. None of our labels do today,
+  // but a location added later could.
+  const cell = (v) => {
+    let s = String(v == null ? '' : v);
+    if (/^[=+\-@]/.test(s)) s = `'${s}`;
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+
+  const rows = [['Location', 'Spanish', 'Type', 'Options', 'Active', 'Code', 'Scan URL']];
+  for (const l of store.listLocations()) {
+    rows.push([
+      l.label_en, l.label_es, l.kind,
+      parseServices(l.services).join(' + '),
+      l.active ? 'yes' : 'no',
+      l.token,
+      `${config.publicBaseUrl}/r/${l.token}`,
+    ].map(cell));
+  }
+
+  // BOM so Excel opens the accented Spanish labels correctly.
+  const csv = '﻿' + rows.map((r) => r.join(',')).join('\r\n') + '\r\n';
+  const stamp = new Date().toISOString().slice(0, 10);
+
+  console.log(`[export] locations.csv (${rows.length - 1} rows)`);
+  return send(res, 200, csv, {
+    'Content-Type': 'text/csv; charset=utf-8',
+    'Content-Disposition': `attachment; filename="amr-locations-${stamp}.csv"`,
+  });
+}
+
 // GET /ops/backup -- downloads a consistent copy of the database.
 //
 // This is the single most important button in the application. The QR tokens
@@ -370,6 +410,7 @@ const server = http.createServer(async (req, res) => {
     if (path === '/ops/locations/add' && method === 'POST') return handleOpsAdd(req, res);
     if (path === '/ops/signs' && method === 'GET') return handleOpsSigns(req, res, url);
     if (path === '/ops/backup' && method === 'GET') return handleOpsBackup(req, res);
+    if (path === '/ops/locations.csv' && method === 'GET') return handleOpsLocationsCsv(req, res);
     if (path === '/ops/login' && method === 'POST') return handleOpsLogin(req, res, ip);
     if (path === '/ops/complete' && method === 'POST') return handleOpsComplete(req, res);
     if (path === '/ops/logout') {

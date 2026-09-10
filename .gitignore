@@ -3,4 +3,5 @@ node_modules/
 *.log
 data/
 signs/
+signs-pdf/
 run-output.txt
