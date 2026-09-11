@@ -146,7 +146,14 @@ npm run locations -- --on   <token>
 npm run locations -- --email <token> <addr>  # route one sign to a different team
 npm run check                              # is anything broken?
 npm test                                   # end-to-end, DRY_RUN only
+
+node scripts/split-signs.js   "<sheet>.html"  # one PDF per full sign, named by location
+node scripts/split-qr-only.js "<sheet>.html"  # one PDF per bare QR code, for a sign vendor
 ```
+
+Both read the sheet you download from `/ops/signs`, so the codes are the live
+ones. `split-signs` refuses a sheet whose wording predates the current copy;
+`split-qr-only` does not care about wording, only codes.
 
 The printed QR never changes. Deactivating a location leaves the sticker on the
 wall, still resolving, but showing "not currently active" instead of dispatching

@@ -15,7 +15,9 @@
     "locations": "node scripts/locations.js",
     "check": "node scripts/check.js",
     "test": "node test/smoke.js",
-    "sign-pdfs": "node scripts/sign-pdfs.js"
+    "sign-pdfs": "node scripts/sign-pdfs.js",
+    "split-signs": "node scripts/split-signs.js",
+    "qr-only": "node scripts/split-qr-only.js"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
